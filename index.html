@@ -420,11 +420,9 @@
     const dt = Math.min(0.032, (now - last) / 1000) / SLOW;
     last = now;
 
-    let eating = false, spitting = false;
     for (let i = ribbons.length - 1; i >= 0; i--) {
       const rb = ribbons[i];
       const t = (now - rb.start) / rb.dur;
-      if (rb.kind === 'eat') eating = true; else if (!rb.landed) spitting = true;
       if (t < 0 || rb.landed) continue;
       if (rb.kind === 'eat') {
         if (t >= 1) {
@@ -443,7 +441,10 @@
       }
     }
 
-    // What the cursor's body is doing follows from what is in its mouth.
+    // What the cursor's body is doing follows from what is in its mouth right now,
+    // after this frame's text has landed or been swallowed.
+    const eating = ribbons.some((r) => r.kind === 'eat');
+    const spitting = ribbons.some((r) => r.kind === 'spit' && !r.landed);
     const next = eating ? 'eat' : spitting ? 'spit' : 'idle';
     if (next === 'eat') {
       jaw.target = 11 + 8 * Math.sin((now / SLOW) * 0.042); // chewing
@@ -467,7 +468,7 @@
     for (let i = 0; i < 2; i++) for (const s of springs) stepSpring(s, dt / 2);
     renderCursor();
 
-    if (ribbons.some((r) => !r.landed) || !springs.every(atRest)) {
+    if (ribbons.some((r) => !r.landed) || mode !== 'idle' || !springs.every(atRest)) {
       requestAnimationFrame(frame);
     } else {
       running = false;
@@ -613,7 +614,7 @@
     const note = document.createElement('p');
     note.className = 'note';
     note.textContent = text;
-    const left = clamp(px + 22, 16, Math.max(16, innerWidth - 240));
+    const left = clamp(px + 6, 16, Math.max(16, innerWidth - 240));
     note.style.left = left + 'px';
     note.style.top = Math.max(8, py - 33) + 'px';
     note.style.maxWidth = innerWidth - left - 24 + 'px';
