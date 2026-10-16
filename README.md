@@ -8,7 +8,9 @@ When you copy, the selected words slide off the page and curve into the cursor t
 
 ## Try it
 
-Open `index.html` in a desktop browser. No build step or dependencies.
+Live: https://manjuchandran1310-cmyk.github.io/hungry-cursor/ (desktop browser with a mouse)
+
+Or open `index.html` locally. No build step or dependencies.
 
 1. Select some words in the paragraph.
 2. Press `Ctrl C` (`⌘ C` on Mac).
