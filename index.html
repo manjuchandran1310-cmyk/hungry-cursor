@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hungry Cursor</title>
+<style>
+  :root {
+    --bg: #f7f6f3;
+    --ink: #1c1b19;
+    --muted: #9b978f;
+    --line: #e3e0d9;
+    --select: #ffe27a;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  ::selection { background: var(--select); }
+
+  /* While a copy is being swallowed, the ink leaves the original words, then seeps back. */
+  ::highlight(eaten-0) { color: rgb(28 27 25 / 0.14); }
+  ::highlight(eaten-1) { color: rgb(28 27 25 / 0.38); }
+  ::highlight(eaten-2) { color: rgb(28 27 25 / 0.62); }
+  ::highlight(eaten-3) { color: rgb(28 27 25 / 0.84); }
+
+  main {
+    width: 100%;
+    max-width: 588px;
+    margin: 0 auto;
+    padding: 13vh 24px 0;
+  }
+
+  .label {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 14px;
+    user-select: none;
+  }
+
+  .source, .note {
+    font-size: 22px;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+  }
+
+  .source {
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  .label + .source + .label { margin-top: 56px; }
+
+  .note {
+    position: fixed;
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    opacity: 0;
+  }
+
+  .note.is-in { opacity: 1; }
+  .note.fade-in { transition: opacity 240ms ease; }
+
+  .hint {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 28px;
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    user-select: none;
+  }
+
+  .hint span { display: inline-flex; align-items: center; gap: 6px; }
+  .hint i { font-style: normal; color: #cfcbc2; }
+
+  kbd {
+    font: inherit;
+    font-size: 12px;
+    padding: 2px 7px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    background: #fff;
+    color: #6f6b63;
+  }
+
+  .clear {
+    font: inherit;
+    color: #6f6b63;
+    background: none;
+    border: 0;
+    padding: 4px 8px;
+    margin-left: 6px;
+    border-radius: 6px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms ease, transform 140ms ease-out, background-color 160ms ease;
+  }
+
+  .clear.is-on { opacity: 1; pointer-events: auto; }
+  .clear:active { transform: scale(0.96); }
+
+  .fly {
+    position: fixed;
+    margin: 0;
+    white-space: pre;
+    pointer-events: none;
+    user-select: none;
+    z-index: 9998;
+    will-change: transform, opacity;
+  }
+
+  .cursor {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 160ms ease;
+    will-change: transform;
+    display: none;
+  }
+
+  .cursor.is-visible { opacity: 1; }
+
+  .cursor-body {
+    transform-origin: 0 0;
+    transform: rotate(-22deg);
+    will-change: transform;
+  }
+
+  .cursor svg {
+    display: block;
+    position: absolute;
+    left: -14px;
+    top: -5px;
+    overflow: visible;
+    filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.22));
+  }
+
+  /* The custom cursor only replaces the real one where there is a real one */
+  @media (hover: hover) and (pointer: fine) {
+    html, body, body * { cursor: none !important; }
+    .cursor { display: block; }
+    .clear:hover { background: rgba(0, 0, 0, 0.05); }
+  }
+</style>
+</head>
+<body>
+  <main>
+    <p class="label">Copy</p>
+    <p class="source" id="source">Select a few of these words and copy them. The cursor has been waiting all morning for something good to eat, and it is not picky about punctuation.</p>
+    <p class="label">Paste anywhere</p>
+  </main>
+
+  <p class="hint">
+    <span>Select</span><i>→</i>
+    <span><kbd class="mod">Ctrl</kbd><kbd>C</kbd> to eat</span><i>→</i>
+    <span>point somewhere, <kbd class="mod">Ctrl</kbd><kbd>V</kbd> to spit</span>
+    <button class="clear" id="clear" type="button">Clear</button>
+  </p>
+
+  <!-- Drawn pointing straight up, then leaned over. The head is two halves hinged at the back, so the tip can open. -->
+  <div class="cursor" id="cursor" aria-hidden="true">
+    <div class="cursor-body" id="cursorBody">
+      <svg width="28" height="32" viewBox="-14 -5 28 32" fill="none">
+        <g stroke="#fff" stroke-width="4" stroke-linejoin="round">
+          <path class="jaw-l" d="M0 0 L-7.5 15.5 L-2.4 13.6 L-2.4 21.5 L0 21.5 Z"/>
+          <path class="jaw-r" d="M0 0 L7.5 15.5 L2.4 13.6 L2.4 21.5 L0 21.5 Z"/>
+        </g>
+        <g fill="#1c1b19" stroke="#1c1b19" stroke-width="1.2" stroke-linejoin="round">
+          <path class="jaw-l" d="M0 0 L-7.5 15.5 L-2.4 13.6 L-2.4 21.5 L0 21.5 Z"/>
+          <path class="jaw-r" d="M0 0 L7.5 15.5 L2.4 13.6 L2.4 21.5 L0 21.5 Z"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const cursorEl = document.getElementById('cursor');
+  const bodyEl = document.getElementById('cursorBody');
+  const jawL = document.querySelectorAll('.jaw-l');
+  const jawR = document.querySelectorAll('.jaw-r');
+  const clearBtn = document.getElementById('clear');
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+  // ?slow=5 plays everything at a fifth of the speed, for looking closely.
+  const SLOW = Number(new URLSearchParams(location.search).get('slow')) || 1;
+
+  if (/Mac|iPhone|iPad/.test(navigator.platform)) {
+    document.querySelectorAll('.mod').forEach((k) => (k.textContent = '⌘'));
+  }
+
+  /* ---------- easing ---------- */
+
+  function bezier(x1, y1, x2, y2) {
+    const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+    const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+    const sampleX = (t) => ((ax * t + bx) * t + cx) * t;
+    const sampleY = (t) => ((ay * t + by) * t + cy) * t;
+    const slopeX = (t) => (3 * ax * t + 2 * bx) * t + cx;
+    return (x) => {
+      if (x <= 0) return 0;
+      if (x >= 1) return 1;
+      let t = x;
+      for (let i = 0; i < 6; i++) {
+        const d = slopeX(t);
+        if (Math.abs(d) < 1e-6) break;
+        t -= (sampleX(t) - x) / d;
+      }
+      return sampleY(t);
+    };
+  }
+
+  // Slurp: the line starts to slide, then whips in.
+  const easeSlurp = bezier(0.5, 0, 0.85, 0.5);
+  // Spit: pushes out, then slows as it settles on the page.
+  const easeSpit = bezier(0.3, 0, 0.2, 1);
+
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  /* ---------- cursor: position is 1:1, everything else is on springs ---------- */
+
+  const mouse = { x: -1, y: -1 };
+  const LEAN = -22; // degrees
+  const DOWN = { x: Math.sin(22 * Math.PI / 180), y: Math.cos(22 * Math.PI / 180) }; // tip-to-tail direction on screen
+  const mouthPoint = () => ({ x: mouse.x + DOWN.x * 6, y: mouse.y + DOWN.y * 6 });
+
+  const spring = (k, c, x = 0) => ({ x, v: 0, target: x, k, c });
+  const squish = spring(420, 19);   // wider + shorter when positive
+  const tilt = spring(300, 17);     // degrees
+  const bob = spring(320, 16);      // px along the body, the swallow
+  const jaw = spring(620, 30);      // degrees each half of the tip swings open
+  const grow = spring(260, 22, 1);
+  const springs = [squish, tilt, bob, jaw, grow];
+
+  let carrying = false;
+
+  addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+    cursorEl.style.transform = `translate3d(${mouse.x}px, ${mouse.y}px, 0)`;
+    cursorEl.classList.add('is-visible');
+  });
+  document.documentElement.addEventListener('mouseleave', () => cursorEl.classList.remove('is-visible'));
+
+  function stepSpring(s, dt) {
+    s.v += (-s.k * (s.x - s.target) - s.c * s.v) * dt;
+    s.x += s.v * dt;
+  }
+  const atRest = (s) => Math.abs(s.v) < 0.004 && Math.abs(s.x - s.target) < 0.001;
+
+  function renderCursor() {
+    const s = clamp(squish.x, -0.3, 0.45);
+    const g = grow.x;
+    bodyEl.style.transform =
+      `rotate(${(LEAN + tilt.x).toFixed(3)}deg) translate(0, ${bob.x.toFixed(2)}px) ` +
+      `scale(${(g * (1 + s)).toFixed(4)}, ${(g * (1 - s * 0.75)).toFixed(4)})`;
+    const a = Math.max(0, jaw.x).toFixed(2);
+    jawL.forEach((p) => p.setAttribute('transform', `rotate(${a} 0 14)`));
+    jawR.forEach((p) => p.setAttribute('transform', `rotate(${-a} 0 14)`));
+  }
+
+  function gulp() {
+    // Mouth is already snapping shut. One big swallow, then a smaller one.
+    setTimeout(() => { squish.v += 6; bob.v += 95; tilt.v += 80; wake(); }, 70 * SLOW);
+    setTimeout(() => { squish.v += 2.4; bob.v += 45; wake(); }, 330 * SLOW);
+  }
+
+  /* ---------- text on a curve ---------- */
+
+  const TAPER = 34;      // px before the mouth where the text starts to narrow
+  const TAPER_MIN = 0.1; // how small it gets at the lips
+
+  // Distance actually travelled once the text is being squeezed narrower near the mouth.
+  function squeeze(r, R) {
+    if (R < 0.01) return r;
+    if (r >= R) return r - (R * (1 - TAPER_MIN)) / 2;
+    return TAPER_MIN * r + ((1 - TAPER_MIN) * r * r) / (2 * R);
+  }
+  const taperAt = (r, R) => (R < 0.01 || r >= R ? 1 : TAPER_MIN + ((1 - TAPER_MIN) * r) / R);
+
+  const SEG = 28;
+  function buildCurve(p0, c1, c2, p3) {
+    const xs = new Float32Array(SEG + 1), ys = new Float32Array(SEG + 1), ls = new Float32Array(SEG + 1);
+    for (let i = 0; i <= SEG; i++) {
+      const t = i / SEG, u = 1 - t;
+      const a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+      xs[i] = a * p0.x + b * c1.x + c * c2.x + d * p3.x;
+      ys[i] = a * p0.y + b * c1.y + c * c2.y + d * p3.y;
+      ls[i] = i ? ls[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]) : 0;
+    }
+    return { xs, ys, ls, len: ls[SEG] };
+  }
+
+  const pt = { x: 0, y: 0, a: 0 };
+  function curveAt(cv, d) {
+    let i = 1;
+    while (i < SEG && cv.ls[i] < d) i++;
+    const l0 = cv.ls[i - 1], span = cv.ls[i] - l0 || 1;
+    const f = clamp((d - l0) / span, 0, 1);
+    pt.x = cv.xs[i - 1] + (cv.xs[i] - cv.xs[i - 1]) * f;
+    pt.y = cv.ys[i - 1] + (cv.ys[i] - cv.ys[i - 1]) * f;
+    pt.a = Math.atan2(cv.ys[i] - cv.ys[i - 1], cv.xs[i] - cv.xs[i - 1]);
+    return pt;
+  }
+
+  function place(g, x, y, angle, scale, alpha) {
+    g.el.style.transform =
+      `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0) rotate(${angle.toFixed(4)}rad) scale(${scale.toFixed(4)})`;
+    g.el.style.opacity = alpha.toFixed(3);
+  }
+
+  // Each visual line of text is one ribbon. Copy: it slides along itself and curves into the tip.
+  function drawEat(line, t) {
+    const M = mouthPoint();
+    const B = line.near;
+    const dist = Math.hypot(M.x - B.x, M.y - B.y);
+    const k1 = Math.min(90, dist * 0.42), k2 = Math.min(64, dist * 0.42);
+    const cv = buildCurve(
+      B,
+      { x: B.x + line.dir * k1, y: B.y },
+      { x: M.x - DOWN.x * k2, y: M.y - DOWN.y * k2 },
+      M
+    );
+    const ramp = Math.min(1, t / 0.12);
+    const R = TAPER * ramp;
+    const L = line.len + cv.len;
+    const end = L + (R * (1 - TAPER_MIN)) / 2;
+    const travel = easeSlurp(t) * (end + 2);
+    const flip = line.dir < 0 ? Math.PI : 0;
+
+    for (const g of line.glyphs) {
+      const r = end - (g.s + travel);
+      if (r <= 0) { g.el.style.opacity = '0'; continue; }
+      const d = L - squeeze(r, R);
+      let x, y, a = 0;
+      if (d <= line.len) {
+        x = line.far.x + line.dir * d;
+        y = line.far.y;
+      } else {
+        const p = curveAt(cv, d - line.len);
+        x = p.x; y = p.y;
+        a = Math.atan2(Math.sin(p.a - flip), Math.cos(p.a - flip));
+      }
+      place(g, x, y, a, taperAt(r, R), 1 - ramp * (1 - Math.min(1, r / 9)));
+    }
+  }
+
+  // Paste: the same ribbon run backwards, out of the tip, up and over, flat onto its line.
+  function drawSpit(line, t) {
+    const M = mouthPoint();
+    const A = line.far;
+    const dist = Math.hypot(M.x - A.x, M.y - A.y);
+    const k1 = Math.min(64, dist * 0.5), k2 = Math.min(90, dist * 0.5);
+    const cv = buildCurve(
+      M,
+      { x: M.x - DOWN.x * k1, y: M.y - DOWN.y * k1 },
+      { x: A.x - k2, y: A.y },
+      A
+    );
+    const ramp = Math.min(1, (1 - t) / 0.12);
+    const R = TAPER * ramp;
+    const lead = cv.len + (R * (1 - TAPER_MIN)) / 2;
+    const held = (1 - easeSpit(t)) * (lead + line.len + 2);
+
+    for (const g of line.glyphs) {
+      const r = lead + g.s - held;
+      if (r <= 0) { g.el.style.opacity = '0'; continue; }
+      const d = squeeze(r, R);
+      let x, y, a = 0;
+      if (d >= cv.len) {
+        x = A.x + (d - cv.len);
+        y = A.y;
+      } else {
+        const p = curveAt(cv, d);
+        x = p.x; y = p.y; a = p.a;
+      }
+      place(g, x, y, a, taperAt(r, R), 1 - ramp * (1 - Math.min(1, r / 9)));
+    }
+  }
+
+  /* ---------- one loop ---------- */
+
+  const ribbons = [];
+  let running = false;
+  let last = 0;
+  let mode = 'idle';
+
+  function wake() {
+    if (running) return;
+    running = true;
+    last = performance.now();
+    requestAnimationFrame(frame);
+  }
+
+  function frame(now) {
+    const dt = Math.min(0.032, (now - last) / 1000) / SLOW;
+    last = now;
+
+    let eating = false, spitting = false;
+    for (let i = ribbons.length - 1; i >= 0; i--) {
+      const rb = ribbons[i];
+      const t = (now - rb.start) / rb.dur;
+      if (rb.kind === 'eat') eating = true; else if (!rb.landed) spitting = true;
+      if (t < 0 || rb.landed) continue;
+      if (rb.kind === 'eat') {
+        if (t >= 1) {
+          rb.glyphs.forEach((g) => g.el.remove());
+          ribbons.splice(i, 1);
+          rb.onDone && rb.onDone();
+        } else {
+          drawEat(rb, t);
+        }
+      } else {
+        drawSpit(rb, Math.min(1, t));
+        if (t >= 1) {
+          rb.landed = true;
+          rb.onDone && rb.onDone();
+        }
+      }
+    }
+
+    // What the cursor's body is doing follows from what is in its mouth.
+    const next = eating ? 'eat' : spitting ? 'spit' : 'idle';
+    if (next === 'eat') {
+      jaw.target = 11 + 8 * Math.sin((now / SLOW) * 0.042); // chewing
+      squish.target = -0.07;
+      grow.target = 1.3;
+    } else if (next === 'spit') {
+      jaw.target = 23;
+      squish.target = -0.1;
+      tilt.target = -7;
+      grow.target = 1.3;
+    } else {
+      jaw.target = 0;
+      tilt.target = 0;
+      grow.target = 1;
+      squish.target = carrying ? 0.12 : 0;
+      if (mode === 'eat') gulp();
+      if (mode === 'spit') { squish.v += 2.2; bob.v -= 40; }
+    }
+    mode = next;
+
+    for (let i = 0; i < 2; i++) for (const s of springs) stepSpring(s, dt / 2);
+    renderCursor();
+
+    if (ribbons.some((r) => !r.landed) || !springs.every(atRest)) {
+      requestAnimationFrame(frame);
+    } else {
+      running = false;
+    }
+  }
+
+  /* ---------- measuring real text ---------- */
+
+  const MAX_GLYPHS = 420;
+
+  // Every visible character in the range, grouped into the lines it actually wrapped to.
+  function linesFromRange(range) {
+    const root = range.commonAncestorContainer;
+    const nodes = [];
+    if (root.nodeType === Node.TEXT_NODE) {
+      nodes.push(root);
+    } else {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let n;
+      while ((n = walker.nextNode())) if (range.intersectsNode(n)) nodes.push(n);
+    }
+
+    const lines = [];
+    const r = document.createRange();
+    let count = 0;
+    for (const node of nodes) {
+      const from = node === range.startContainer ? range.startOffset : 0;
+      const to = node === range.endContainer ? range.endOffset : node.length;
+      for (const m of node.data.slice(from, to).matchAll(/\S/gu)) {
+        if (count >= MAX_GLYPHS) return lines;
+        r.setStart(node, from + m.index);
+        r.setEnd(node, from + m.index + m[0].length);
+        const rect = r.getBoundingClientRect();
+        if (!rect.width || !rect.height) continue;
+        let line = lines[lines.length - 1];
+        if (!line || Math.abs(rect.top - line.top) > rect.height * 0.5) {
+          line = { top: rect.top, cy: rect.top + rect.height / 2, left: rect.left, right: rect.right, glyphs: [] };
+          lines.push(line);
+        }
+        line.left = Math.min(line.left, rect.left);
+        line.right = Math.max(line.right, rect.right);
+        line.glyphs.push({ ch: m[0], rect, parent: node.parentElement });
+        count++;
+      }
+    }
+    return lines;
+  }
+
+  function makeGlyph(g) {
+    const cs = getComputedStyle(g.parent);
+    const el = document.createElement('span');
+    el.className = 'fly';
+    el.textContent = g.ch;
+    el.style.font = cs.font;
+    el.style.color = cs.color;
+    el.style.lineHeight = g.rect.height + 'px';
+    el.style.left = -g.rect.width / 2 + 'px';
+    el.style.top = -g.rect.height / 2 + 'px';
+    g.el = el;
+    g.cx = g.rect.left + g.rect.width / 2;
+    return el;
+  }
+
+  /* ---------- copy ---------- */
+
+  const INK_STEPS = 4;
+  let inkTimers = [];
+  function setInk(range, level) {
+    if (!window.CSS || !CSS.highlights || typeof Highlight === 'undefined') return;
+    for (let i = 0; i < INK_STEPS; i++) CSS.highlights.delete('eaten-' + i);
+    if (range && level < INK_STEPS) CSS.highlights.set('eaten-' + level, new Highlight(range));
+  }
+
+  function eat() {
+    const sel = getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+
+    carrying = true;
+    if (reduceMotion.matches) { wake(); return; }
+
+    const range = sel.getRangeAt(0).cloneRange();
+    const lines = linesFromRange(range);
+    if (!lines.length) return;
+
+    // Whichever end of the selection the cursor is at goes in first.
+    const first = lines[0], lastLine = lines[lines.length - 1];
+    const toStart = Math.hypot(mouse.x - first.left, mouse.y - first.cy);
+    const toEnd = Math.hypot(mouse.x - lastLine.right, mouse.y - lastLine.cy);
+    const dir = toEnd <= toStart ? 1 : -1;
+    if (dir > 0) lines.reverse();
+
+    inkTimers.forEach(clearTimeout);
+    inkTimers = [];
+    setInk(range, 0);
+
+    const frag = document.createDocumentFragment();
+    let start = performance.now();
+    lines.forEach((line, i) => {
+      line.kind = 'eat';
+      line.dir = dir;
+      line.len = line.right - line.left;
+      line.far = { x: dir > 0 ? line.left : line.right, y: line.cy };
+      line.near = { x: dir > 0 ? line.right : line.left, y: line.cy };
+      for (const g of line.glyphs) {
+        frag.appendChild(makeGlyph(g));
+        g.s = dir > 0 ? g.cx - line.left : line.right - g.cx;
+        // Sits exactly on top of the original until its line starts to move.
+        place(g, g.cx, line.cy, 0, 1, 1);
+      }
+      line.start = start;
+      line.dur = clamp(420 + line.len * 1.2, 520, 1100) * SLOW;
+      start += line.dur * 0.55;
+      if (i === lines.length - 1) {
+        line.onDone = () => {
+          for (let s = 1; s <= INK_STEPS; s++) {
+            inkTimers.push(setTimeout(() => setInk(range, s), (160 + s * 70) * SLOW));
+          }
+        };
+      }
+      ribbons.push(line);
+    });
+    document.body.appendChild(frag);
+    wake();
+  }
+
+  document.addEventListener('copy', eat);
+  document.addEventListener('cut', eat);
+
+  /* ---------- paste ---------- */
+
+  const MAX_PASTE = 500;
+
+  document.addEventListener('paste', (e) => {
+    let text = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
+    text = text.replace(/\r\n?/g, '\n').replace(/^\n+|\s+$/g, '');
+    if (!text) return;
+    e.preventDefault();
+    if (text.length > MAX_PASTE) text = text.slice(0, MAX_PASTE).trimEnd() + '…';
+
+    // The text starts at the pointer and runs to the right of it.
+    const px = mouse.x < 0 ? innerWidth / 2 - 120 : mouse.x;
+    const py = mouse.y < 0 ? innerHeight * 0.6 : mouse.y;
+    const note = document.createElement('p');
+    note.className = 'note';
+    note.textContent = text;
+    const left = clamp(px + 22, 16, Math.max(16, innerWidth - 240));
+    note.style.left = left + 'px';
+    note.style.top = Math.max(8, py - 33) + 'px';
+    note.style.maxWidth = innerWidth - left - 24 + 'px';
+    document.body.appendChild(note);
+    clearBtn.classList.add('is-on');
+
+    if (reduceMotion.matches) {
+      note.classList.add('fade-in');
+      note.getBoundingClientRect();
+      note.classList.add('is-in');
+      return;
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(note);
+    const lines = linesFromRange(range);
+    if (!lines.length) { note.classList.add('is-in'); return; }
+
+    const frag = document.createDocumentFragment();
+    let start = performance.now();
+    let pending = lines.length;
+    for (const line of lines) {
+      line.kind = 'spit';
+      line.len = line.right - line.left;
+      line.far = { x: line.left, y: line.cy };
+      for (const g of line.glyphs) {
+        frag.appendChild(makeGlyph(g));
+        g.s = g.cx - line.left;
+        g.el.style.opacity = '0';
+      }
+      line.start = start;
+      line.dur = clamp(700 + line.len * 1.8, 820, 1700) * SLOW;
+      start += line.dur * 0.5;
+      line.onDone = () => {
+        if (--pending) return;
+        // Every line is lying exactly where the real text is: swap them.
+        note.classList.add('is-in');
+        for (const l of lines) {
+          l.glyphs.forEach((g) => g.el.remove());
+          ribbons.splice(ribbons.indexOf(l), 1);
+        }
+      };
+      ribbons.push(line);
+    }
+    document.body.appendChild(frag);
+    wake();
+  });
+
+  clearBtn.addEventListener('click', () => {
+    document.querySelectorAll('.note').forEach((n) => n.remove());
+    clearBtn.classList.remove('is-on');
+  });
+})();
+</script>
+</body>
+</html>
